@@ -1,0 +1,3 @@
+[submodule "ROMTools"]
+	path = ROMTools
+	url = https://github.com/rezafouladian/MacintoshROMTools.git
