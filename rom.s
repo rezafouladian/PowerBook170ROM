@@ -18,6 +18,9 @@ arrow       EQU     -$6C
 gray        EQU     -$18
 ;ProductInfo.
 Rom85Word   EQU     $14
+ProductKind EQU     $12
+
+            org     $40800000
 
 BaseOfRom:
             dc.l    $420DBFF3
@@ -459,5 +462,440 @@ InitGlobalVars:
             rts
             dc.b    8
 SWITCHGOODIES:
-            dc.w    $400
+            dc.w    OSTable, 4*numOStrap
+            dc.w    ToolTable, 4*numTBtrap
+            dc.w    $B80, $26
+            dc.w    $BAE, $52
+            dc.w    HFSFlags, 2
+            dc.w    DefVRefNum, 2
+            dc.w    DefVCBPtr, 4
+            dc.w    ScrDmpEnb, 2
+            dc.w    CurDirStore, 4
+            dc.w    MBProcHndl, 4
+            dc.w    MonkeyLives, $2
+            dc.w    MemTop, $14
+            dc.w    SEvtEnb, $4
+            dc.w    MinStack, $22
+            dc.w    $800, $2FC
+            dc.w    ApplLimit, $4
+            dc.w    ApplZone, $4
+            dc.w    AuxWinHead, $4
+            dc.w    AuxCtlHead, $4
+            dc.w    BNMQHd, $4
+            dc.w    MenuCInfo, $4
+            dc.w    MenuDisable, $8
+            dc.w    TheGDevice, $4
+WDCBSwitch:
+            dc.w    0,0,0
+PMSPSwitch:
+            dc.w    0,0,4,0,0
+WDCBSWOS:
+            dc.w    $5C
+PMSPSWOS:
+            dc.w    $62
+InitSwitcherTable:
+            moveq   #$6C,D0
+            _NewPtrSysClear
+            movea.l A0,A1
+            lea     SWITCHGOODIES,A0
+            moveq   #$6C,D0
+            _BlockMove
+            move.l  A1,SwitcherTPtr
+            rts
+            ds.b    12
+GetPRAM:
+            _InitUtil
+            moveq   #0,D1
+            move.b  SPKbd,D1
+            moveq   #$F,D0
+            and.w   D1,D0
+            bne.b   .L1
+            moveq   #$48,D0
+.L1:
+            add.w   D0,D0
+            move.w  D0,KeyRepThresh
+            lsr.w   #4,D1
+            bne.b   .L2
+            move.w  #$1FFF,D1
+.L2:
+            lsl.w   #2,D1
+            move.w  D1,KeyThresh
+            move.b  SPClikCaret,D1
+            moveq   #$F,D0
+            and.b   D1,D0
+            lsl.b   #2,D0
+            move.l  D0,CaretTime
+            lsr.b   #2,D1
+            moveq   #$3C,D0
+            and.b   D1,D0
+            move.l  D0,DoubleTime
+            rts
+            ds.b    2
+WhichCPU:
+            moveq   #2,D7
+            jmp     (.CheckIndexScale,PC,D7*2)
+.CheckIndexScale:
+            bra.b   .NoIndexScale
+            bra.w   WhichCPUPatch
+            ds.b    14
+.NoIndexScale:
+            move.l  SP,D7
+            clr.w   -(SP)
+            bsr.b   .doRTE
+            exg     D7,SP
+            sub.l   SP,D7
+            addq.l  #2,D7
+            lsr.l   #1,D7
+            rts
+.doRTE:
+            move    SR,-(SP)
+            rte
+            ds.b    2
+WhichBoard:
+            swap    D7
+            clr.w   D7
+            move.b  (ProductKind,A1),D7
+            swap    D7
+            rts
+            ds.b    4
+SetUpTimeK:
+            move.l  Lev1AutoVector,-(SP)
+            move    SR,-(SP)
+            ori     #HiIntMask,SR
+            movea.l VIA,A1
+            bclr.b  #5,(vACR,A1)
+            move.b  #$FF,(vT2CH)
+            move.b  #$A0,(vIER,A1)
+            moveq   #$C,D1
+            moveq   #3,D2
+            movea.l SP,A3
+            lea     TimerInt,A0
+            move.l  A0,Lev1AutoVector
+            lea     TimingTable,A4
+.nextRoutine:
+            movea.l A4,A0
+            adda.w  (A4),A0
+            moveq   #2,D0
+            lea     .cacheLoaded,A2
+            jmp     (A0)
+.cacheLoaded:
+            movea.l A4,A0
+            adda.w  (A4)+,A0
+            moveq   #-1,D0
+            lea     .timedOut,A2
+            andi    #$F8FF,SR
+            jmp     (A0)
+.timedOut:
+            not.w   D0
+            movea.w (A4)+,A0
+            move.w  D0,(A0)
+            tst.w   (A4)
+            bne.b   .nextRoutine
+            move.b  #$20,(vIER,A1)
+            move    (SP)+,SR
+            move.l  (SP)+,Lev1AutoVector
+            rts
+TimerInt:
+            tst.b   (vT2C,A1)
+            movea.l A3,SP
+            jmp     (A2)
+TimingTable:
+            dc.w    DbraTime-*,TimeDBRA
+            dc.w    SCCTime-*,TimeSCCDB
+            dc.w    SCSITime-*,TimeSCSIDB
+            dc.w    VIATime-*,TimeVIA
+            dc.w    0
+DbraTime:
+            move.b  D1,(vT2C,A1)
+            move.b  D2,(vT2CH,A1)
+.loop:
+            dbf     D0,.loop
+            jmp     (A2)
+SCCTime:
+            movea.l (SCCRd),A0
+            move.b  D1,(vT2C,A1)
+            move.b  D2,(vT2CH,A1)
+.loop:
+            btst.b  #0,(A0)
+            dbf     D0,.loop
+            jmp     (A2)
+SCSITime:
+            bra.l   SETUPSCSITIME
+            ds.b    18
+VIATime:
+            lea     (vIER,A1),A0
+            move.b  D1,(vT2C,A1)
+            move.b  D2,(vT2CH,A1)
+.loop:
+            btst.b  #0,(A0)
+            dbf     D0,.loop
+            jmp     (A2)
+            ds.b    14
+RunDiags:
+            BigJsr  StartTest1,A0                   
+            ds.b    30
+STARTTESTFLAGS:
+            ds.b    8
+SetupHWBases:
+            move.l  AddrMapFlags,D0
+            movea.l UnivInfoPtr,A0
+            adda.l  (A0),A0
+            lea     .BaseInitTable,A2               ; Point to the table
+.loop:
+            move.w  (A2)+,D3                        ; Get the bit number
+            bmi.b   .exit                           ; Exit if end of table
+            movea.w (A2)+,A3                        ; Get the low mem address
+            btst.l  D3,D0                           ; See if the base is valid
+            beq.b   .loop                           ; If not, skip it
+            lsl.w   #2,D3                           ; Setup index into bases table
+            move.l  (A0,D3),A3                      ; Initialize the low mem
+            bra.s   .loop
+.exit:
+            bra.l   SETUPMISKSCSI
+            ds.b    20
+.BaseInitTable:
+            dc.w    VIA1Exists, VIA
+            dc.w    SCCRdExists, SCCRd
+            dc.w    SCCWrExists, SCCWr
+            dc.w    SCCIOPExists, SCCRd
+            dc.w    SCCIOPExists, SCCWr
+            dc.w    IWMExists, IWM
+            dc.w    SWIMExists, IWM
+            dc.w    PWMExists, PWMBuf1
+            dc.w    PWMExists, PWMBuf2
+            dc.w    SoundExists, SoundBase
+            dc.w    SCSIExists, SCSIBase
+            dc.w    SCSIDackExists, SCSIDMA
+            dc.w    SCSIHskExists, SCSIHsk
+            dc.w    VIA2Exists, VIA2
+            dc.w	ASCExists, ASCBase
+            dc.w	SCSIDMAExists, SCSIBase
+            dc.w	SCSIDMAExists, SCSIDMA
+            dc.w	SCSIDMAExists, SCSIHsk
+            dc.w    -1
+            ds.b    4
+InitSCSI:
+            bra.l   InitSCSHW
+            ds.b    26
+InitIWM:
+            btst.b  #5,(AddrMapFlags+3)
+            beq.b   .ExitInitIWM
+            movea.l IWM,A0
+            moveq   #$17,D0
+.L1:
+            move.b  #-$42,(ph3L,A0)
+            move.b  #-$8,(ph3H,A0)
+            tst.b   (q7L,A0)
+            tst.b   (mtrOff,A0)
+            tst.b   (q6H,A0)
+            move.b  (q7L,A0),D2
+            btst.l  #5,D2
+            bne.b   .L1
+            and.b   D0,D2
+            cmp.b   D0,D2
+            beq.b   .L2
+            move.b  D0,(q7H,A0)
+            tst.b   (q7L,A0)
+            bra.b   .L1
+.L2:
+            tst.b   (q6L,A0)
+.ExitInitIWM:
+            rts
+            ds.b    10
+InitSCCData:
+            dc.l    $9C00940
+            dc.l    $44C0200
+            dc.l    $3C00F00
+            dc.l    $100010
+            dc.l    $1000980
+            dc.l    $44C03C0
+            dc.l    $F000010
+            dc.l    $100100
+InitSCC:
+            btst.b  #1,(AddrMapFlags+1)
+            beq.b   .NoIOP
+            jsr     SCCIOPHWINIT
+.NoIOP:
+            movea.l SCCWr,A0
+            movea.l SCCRd,A1
+            lea     InitSCCData,A2
+            moveq   #12,D1
+            bsr.b   InitSCC2
+            addq.w  #2,A0
+            addq.w  #2,A1
+            moveq   #14,D1
+InitSCC2:
+            move.b  (A1),D2
+            bra.b   .L2
+.L1:
+            move.l  (SP),(SP)
+            move.l  (SP),(SP)
+            move.b  (A2)+,(A0)
+.L2:
+            dbf     D1,.L1
+            rts
+            ds.b    12
+ConfigureRAM:
+            movea.l (SP)+,SP
+            move.l  (4,A6),D3
+            cmpi.b  #$200000,D3
+            bge.b   .plentyORam
+            lsr.l   #2,D3
+            mulu.l  #3,D3
+            bra.b   .stakOk
+.plentyORam:
+            move.l  #defStackAddr,D3
+.stakOk:
+            exg     D3,SP
+            adda.l  (A6),SP
+            move.l  D3,-(SP)
+            movea.l A6,A3
+.L1:
+            movea.l A3,A2
+            move.l  (A3)+,D3
+.L2:
+            add.l   (A3)+,D3
+            cmp.l   (A3)+,D3
+            beq.b   .L2
+            sub.l   (A2)+,D3
+            move.l  D3,(A2)+
+            subq.l  #4,A3
+            cmpi.l  #-1,(A3)
+            bne.b   .L1
+            move.l  (A3),(A2)+
+.L3:
+            clr.l   (A2)+
+            move.w  A2,D3
+            bne.b   .L3
+            suba.l  A6,A2
+            move.l  A2,(-8,A6)
+            rts
+            ds.b    288
+InitVidGlobals:
+            rts
+            rts
+            ds.b    12
+RdVidParam:
+            movem.l A2-A1/D3,-(SP)
+            move.b  (spId,A0),D3
+            clr.b   (spExtDev,A0)
+            _SRsrcInfo
+            bne.w   .L1
+            _SFindDevBase
+            bne.w   .L1
+            move.l  (A0),ScrnBase
+            move.b  #MinorLength,(spId,A0)
+            _SReadLong
+            bne.w   .L1
+            move.l  (A0),ScreenBytes
+            move.b  D3,(spId,A0)
+            bsr.w   GetDefVidMode
+            move.b  D0,(spId,A0)
+            _SFindStruct
+            bne.w   .L1
+            move.b  #1,(spId,A0)
+            _SGetBlock
+            bne.w   .L1
+            movea.l (A0),A1
+            move.w  ($A,A1),ColLines
+            move.w  ($C,A1),RowBits
+            move.w  ($4,A1),D0
+            move.w  D0,ScreenRow
+            move.w  D0,CRSRROW
+            move.w  ($1A,A1),ScrVRes
+            move.w  ($16,A1),ScrHRes
+            move.l  (A1),D0
+            add.l   D0,ScrnBase
+            move.l  ScrnBase,CRSRBASE
+            moveq   #0,D0
+            move.b  ($31,A0),D0
+            _AttachVBL
+            move.l  #VideoMagic,VideoInfoOK
+            move.l  A1,($4,A0)
+            _SDisposePtr
+            moveq   #0,D0
+            bra.b   .L2
+.L1:
+            moveq   #1,D0
+.L2:
+            move.b  D3,(spId,A0)
+            movem.l (SP)+,D3/A1-A2
+            rts
+OpensDrvr:
+            move.l  A2,-(SP)
+            suba.w  #$18,SP
+            movea.l SP,A2
+            move.l  A2,($14,A0)
+            suba.l  #$100,SP
+            move.l  SP,(A0)
+            _SReadDrvrName
+            bne.w   .L1
+            move.l  (spResult,A0),(seIOFileName,A2)
+            move.b  (spSlot,A0),(seSlot,A2)
+            move.b  (spID,A0),(sesRsrcId,A2)
+            clr.b   (seDevice,A2)
+            move.l  (seIOFileName,A2),(ioFileName,A1)
+            clr.l   (ioMix,A1)
+            clr.w   (ioFlags,A1)
+            bset.b  #fMulti,(ioFlags+1,A1)
+            move.l  A2,(ioSEBlkPtr,A1)
+            clr.b   (ioPermssn,A1)
+            exg.l   A0,A1
+            _HOpen
+            exg.l   A0,A1
+.L1:
+            lea     ($118,SP),SP
+            movea.l (SP)+,A2
+            rts
+            ds.b    12
+OpenVidDeflt:
+            movea.l A0,A2
+            subq.w  #2,SP
+            movea.l SP,A0
+            _GetVideoDefault
+            move.b  (A0)+,(spSlot,A2)
+            move.b  (A0)+,(spID,A2)
+            addq.w  #2,SP
+            movea.l A2,A0
+            clr.b   (spExtDev,A0)
+            _SRsrcInfo
+            bne.b   .Error
+            cmpi.l  #$30001,(spCategory,A0)
+            bne.b   .Error
+            cmpi.w  #DrSwApple,(spDrvrSW,A0)
+            bne.b   .Error
+            bsr.w   RdVidParam
+            bne.b   .Error
+            bsr.w   OpensDrvr
+            bne.b   .Error
+            bsr.w   InitVidDeflt
+.Error:
+            rts
+            ds.b    14
+InitVidDeflt:
+            movem.l A1-A0/D2-D1,-(SP)
+            clr.l   -(SP)
+            move.w  (ioRefNum,A1),-(SP)
+            bsr.w   GetDefVidMode
+            move.l  D0,-(SP)
+            _NewGDevice
+            movea.l (SP)+,A0
+            move.l  A0,TheGDevice
+            move.l  A0,DeviceList
+            move.l  A0,MainDevice
+            move.l  A0,SrcDevice
+            move.l  A0,CrsrDevice
+            movea.l (A0),A1
+            ori.w   #$B800,(GDFlags,A1)
+            jsr    InitDefGamma
+            movem.l (SP)+,D1-D2/A0-A1
+            rts
+            ds.b    4
+AddVidDevice:
+            movem.l A3-A0/D2-D1,-(SP)
+            move.w  (ioRefNum,A1),D1
+            move.l  DeviceList,D0
+.NextDev:
+            movea.l D0,A2
+            
 
